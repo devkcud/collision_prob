@@ -1,6 +1,7 @@
 use std::env;
 
 use rug::Float;
+use serde::Serialize;
 use tabled::{Table, Tabled, settings::Style};
 
 fn collision_probability(n: u128, space: u128, precision: u32) -> Float {
@@ -30,6 +31,35 @@ struct Group {
     pub spec: String,
     pub expanded: String,
     pub positions: u32,
+}
+
+#[derive(Serialize)]
+struct JsonSpace {
+    pub formula: String,
+    pub size: String,
+    pub groups: Vec<JsonGroup>,
+}
+
+#[derive(Serialize)]
+struct JsonGroup {
+    pub spec: String,
+    pub positions: u32,
+    pub chars: String,
+}
+
+#[derive(Serialize)]
+struct JsonRow {
+    pub n: String,
+    pub probability: f64,
+    pub percentage: f64,
+    pub unique_chance: f64,
+    pub retries: f64,
+}
+
+#[derive(Serialize)]
+struct JsonOutput {
+    pub space: JsonSpace,
+    pub results: Vec<JsonRow>,
 }
 
 fn expand_chars(spec: &str) -> String {
@@ -127,9 +157,15 @@ struct Row {
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let raw_args: Vec<String> = env::args().collect();
+    let json_output = raw_args.iter().any(|a| a == "--json");
+    let args: Vec<String> = raw_args.into_iter().filter(|a| a != "--json").collect();
+
     if args.len() < 3 {
-        eprintln!("Usage: {} '<space_spec>' <n1> [n2] [n3] ...", args[0]);
+        eprintln!(
+            "Usage: {} [--json] '<space_spec>' <n1> [n2] [n3] ...",
+            args[0]
+        );
         eprintln!("  space_spec: 'chars|count;chars|count;...'");
         eprintln!("  Example: {} 'abcdefg|2;12345|3;!@#' 1000 5000", args[0]);
         std::process::exit(1);
@@ -168,6 +204,49 @@ fn main() {
     }
 
     let precision = 256;
+
+    if json_output {
+        let json_groups: Vec<JsonGroup> = groups
+            .iter()
+            .map(|g| JsonGroup {
+                spec: g.spec.clone(),
+                positions: g.positions,
+                chars: g.expanded.clone(),
+            })
+            .collect();
+
+        let results: Vec<JsonRow> = tests
+            .iter()
+            .map(|&n| {
+                let p = collision_probability(n, space, precision);
+                let v = p.to_f64();
+                let space_f = Float::with_val(precision, space);
+                let remaining = Float::with_val(precision, space - n);
+                let uc = (remaining.clone() / &space_f * 100u32).to_f64();
+                let rt = (space_f / remaining).to_f64();
+
+                JsonRow {
+                    n: n.to_string(),
+                    probability: v,
+                    percentage: v * 100.0,
+                    unique_chance: uc,
+                    retries: rt,
+                }
+            })
+            .collect();
+
+        let output = JsonOutput {
+            space: JsonSpace {
+                formula: formula.clone(),
+                size: space.to_string(),
+                groups: json_groups,
+            },
+            results,
+        };
+
+        println!("{}", serde_json::to_string_pretty(&output).unwrap());
+        return;
+    }
 
     println!(
         "Space: {} = {} possible IDs",
