@@ -1,0 +1,8 @@
+[package]
+name = "collision_probability"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rug = "1.29.0"
+tabled = "0.17"
