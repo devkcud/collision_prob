@@ -199,6 +199,8 @@ fn main() {
 
             let odds = if v >= 1.0 {
                 String::from("1 in 1")
+            } else if v <= 0.0 {
+                String::from("never")
             } else {
                 let inv = 1.0 / v;
                 if inv >= 10.0 {
