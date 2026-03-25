@@ -87,14 +87,17 @@ fn parse_space(spec: &str) -> Result<(u128, String, Vec<Group>), String> {
         let base = expanded.len() as u128;
         let group_size = base.checked_pow(positions).ok_or_else(|| {
             format!(
-                "space overflow: {}^{} exceeds u128 max (~3.4e38). Try fewer positions.",
-                base, positions
+                "space overflow: {}^{} exceeds u128 max ({}). Try fewer positions.",
+                base,
+                positions,
+                format_with_commas(u128::MAX)
             )
         })?;
         space = space.checked_mul(group_size).ok_or_else(|| {
             format!(
-                "total space overflow at group '{}'. Combined space exceeds u128 max (~3.4e38).",
-                group
+                "total space overflow at group '{}'. Combined space exceeds u128 max ({}).",
+                group,
+                format_with_commas(u128::MAX)
             )
         })?;
 
@@ -106,7 +109,7 @@ fn parse_space(spec: &str) -> Result<(u128, String, Vec<Group>), String> {
         });
     }
 
-    Ok((space, formula.join(" \u{00d7} "), groups))
+    Ok((space, formula.join(" * "), groups))
 }
 
 #[derive(Tabled)]
@@ -192,7 +195,7 @@ fn main() {
             let v = p.to_f64();
 
             let probability = if v >= 1.0 {
-                String::from("\u{2248} 100%")
+                String::from("~= 100%")
             } else {
                 format!("{:.2e} ({:.4}%)", v, v * 100.0)
             };
