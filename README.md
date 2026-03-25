@@ -4,6 +4,8 @@ cli tool that answers: given my id format, how likely are collisions to `n`? (co
 
 uses the [Birthday problem](https://en.wikipedia.org/wiki/Birthday_problem) with math to compute exact collision probabilities for any character-based id scheme (mostly)
 
+> assumes uniform random generation
+
 ## build
 
 ```
@@ -18,8 +20,6 @@ cargo run --release -- '<space_spec>' <...tests>
 
 - `space_spec` defines your id format (see below)
 - `...tests` are the population sizes to test
-
-> assumes uniform random generation
 
 ### space spec format
 
