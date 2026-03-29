@@ -1,12 +1,12 @@
 use std::env;
 
-use rug::Float;
+use rug::{Complete, Float, Integer};
 use serde::Serialize;
 use tabled::{Table, Tabled, settings::Style};
 
-fn collision_probability(n: u128, space: u128, precision: u32) -> Float {
-    let lg_s = Float::with_val(precision, space + 1).ln_gamma();
-    let lg_sn = Float::with_val(precision, space - n + 1).ln_gamma();
+fn collision_probability(n: u128, space: &Integer, precision: u32) -> Float {
+    let lg_s = Float::with_val(precision, Integer::from(space + 1u32)).ln_gamma();
+    let lg_sn = Float::with_val(precision, Integer::from(space - n) + 1u32).ln_gamma();
     let n_f = Float::with_val(precision, n);
     let ln_space = Float::with_val(precision, space).ln();
 
@@ -15,7 +15,7 @@ fn collision_probability(n: u128, space: u128, precision: u32) -> Float {
     Float::with_val(precision, 1) - p_no_collision
 }
 
-fn format_with_commas(n: u128) -> String {
+fn format_with_commas(n: impl std::fmt::Display) -> String {
     let s = n.to_string();
     let mut result = String::new();
     for (i, c) in s.chars().rev().enumerate() {
@@ -82,8 +82,8 @@ fn expand_chars(spec: &str) -> String {
     result
 }
 
-fn parse_space(spec: &str) -> Result<(u128, String, Vec<Group>), String> {
-    let mut space: u128 = 1;
+fn parse_space(spec: &str) -> Result<(Integer, String, Vec<Group>), String> {
+    let mut space = Integer::from(1u32);
     let mut formula = Vec::new();
     let mut groups = Vec::new();
 
@@ -114,22 +114,9 @@ fn parse_space(spec: &str) -> Result<(u128, String, Vec<Group>), String> {
             return Err(format!("empty character set in group '{}'", group));
         }
 
-        let base = expanded.len() as u128;
-        let group_size = base.checked_pow(positions).ok_or_else(|| {
-            format!(
-                "space overflow: {}^{} exceeds u128 max ({}). Try fewer positions.",
-                base,
-                positions,
-                format_with_commas(u128::MAX)
-            )
-        })?;
-        space = space.checked_mul(group_size).ok_or_else(|| {
-            format!(
-                "total space overflow at group '{}'. Combined space exceeds u128 max ({}).",
-                group,
-                format_with_commas(u128::MAX)
-            )
-        })?;
+        let base = expanded.len() as u32;
+        let group_size = Integer::u_pow_u(base, positions).complete();
+        space *= group_size;
 
         formula.push(format!("{}^{}", base, positions));
         groups.push(Group {
@@ -192,11 +179,11 @@ fn main() {
             eprintln!("Error: n must be greater than 0");
             std::process::exit(1);
         }
-        if n >= space {
+        if space <= n {
             eprintln!(
                 "Error: n={} must be less than space={}",
                 format_with_commas(n),
-                format_with_commas(space)
+                format_with_commas(&space)
             );
             std::process::exit(1);
         }
@@ -218,10 +205,10 @@ fn main() {
         let results: Vec<JsonRow> = tests
             .iter()
             .map(|&n| {
-                let p = collision_probability(n, space, precision);
+                let p = collision_probability(n, &space, precision);
                 let v = p.to_f64();
-                let space_f = Float::with_val(precision, space);
-                let remaining = Float::with_val(precision, space - n);
+                let space_f = Float::with_val(precision, &space);
+                let remaining = Float::with_val(precision, Integer::from(&space - n));
                 let uc = (remaining.clone() / &space_f * 100u32).to_f64();
                 let rt = (space_f / remaining).to_f64();
 
@@ -251,7 +238,7 @@ fn main() {
     println!(
         "Space: {} = {} possible IDs",
         formula,
-        format_with_commas(space)
+        format_with_commas(&space)
     );
     println!("Spec:");
     for g in &groups {
@@ -270,7 +257,7 @@ fn main() {
     let rows: Vec<Row> = tests
         .iter()
         .map(|&n| {
-            let p = collision_probability(n, space, precision);
+            let p = collision_probability(n, &space, precision);
             let v = p.to_f64();
 
             let probability = if v >= 1.0 {
@@ -292,8 +279,8 @@ fn main() {
                 }
             };
 
-            let space_f = Float::with_val(precision, space);
-            let remaining = Float::with_val(precision, space - n);
+            let space_f = Float::with_val(precision, &space);
+            let remaining = Float::with_val(precision, Integer::from(&space - n));
             let uc = (remaining.clone() / &space_f * 100u32).to_f64();
             let rt = (space_f / remaining).to_f64();
 
