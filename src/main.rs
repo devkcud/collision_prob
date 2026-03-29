@@ -1,9 +1,29 @@
-use std::env;
-
+use clap::{Parser, Subcommand};
 use rand::seq::IndexedRandom;
 use rug::{Complete, Float, Integer};
 use serde::Serialize;
 use tabled::{Table, Tabled, settings::Style};
+
+#[derive(Parser)]
+struct Cli {
+    pub spec: String,
+    #[command(subcommand)]
+    pub command: Command,
+    #[arg(long, global = true)]
+    pub json: bool,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    Space,
+    Sets {
+        count: usize,
+    },
+    Collision {
+        #[arg(required = true)]
+        values: Vec<u128>,
+    },
+}
 
 fn collision_probability(n: u128, space: &Integer, precision: u32) -> Float {
     let lg_s = Float::with_val(precision, Integer::from(space + 1u32)).ln_gamma();
@@ -60,8 +80,6 @@ struct JsonRow {
 #[derive(Serialize)]
 struct JsonOutput {
     pub space: JsonSpace,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub examples: Option<Vec<String>>,
     pub results: Vec<JsonRow>,
 }
 
@@ -162,128 +180,83 @@ struct Row {
     pub retries: String,
 }
 
-fn main() {
-    let raw_args: Vec<String> = env::args().collect();
-    let json_output = raw_args.iter().any(|a| a == "--json");
-    let space_flag = raw_args
+fn json_groups(groups: &[Group]) -> Vec<JsonGroup> {
+    groups
         .iter()
-        .find(|a| a == &"--space" || a.starts_with("--space="))
-        .cloned();
-    let sets_flag = raw_args
-        .iter()
-        .find(|a| a.starts_with("--sets="))
-        .cloned();
-
-    if raw_args.iter().any(|a| a == "--sets") {
-        eprintln!("Error: --sets requires a value, e.g. --sets=5");
-        std::process::exit(1);
-    }
-
-    let num_sets: Option<usize> = sets_flag.map(|f| {
-        let val = f.strip_prefix("--sets=").unwrap();
-        let n = val.parse::<usize>().unwrap_or_else(|_| {
-            eprintln!("Error: invalid --sets value '{}'", val);
-            std::process::exit(1);
-        });
-        if n == 0 {
-            eprintln!("Error: --sets must be at least 1");
-            std::process::exit(1);
-        }
-        n.min(10)
-    });
-
-    let args: Vec<String> = raw_args
-        .into_iter()
-        .filter(|a| {
-            a != "--json"
-                && a != "--space"
-                && !a.starts_with("--space=")
-                && !a.starts_with("--sets=")
+        .map(|g| JsonGroup {
+            spec: g.spec.clone(),
+            positions: g.positions,
+            chars: g.expanded.clone(),
         })
-        .collect();
+        .collect()
+}
 
-    let min_args = if space_flag.is_some() { 2 } else { 3 };
-    if args.len() < min_args {
-        eprintln!(
-            "Usage: {} [--json] [--space[=pretty]] [--sets=N] '<space_spec>' [n1] [n2] ...",
-            args[0]
+fn cmd_space(json: bool, space: &Integer, formula: &str, groups: &[Group]) {
+    if json {
+        let output = JsonSpace {
+            formula: formula.to_string(),
+            size: space.to_string(),
+            groups: json_groups(groups),
+        };
+        println!("{}", serde_json::to_string_pretty(&output).unwrap());
+    } else {
+        println!(
+            "Space: {} = {} possible IDs",
+            formula,
+            format_with_commas(space)
         );
-        eprintln!("  space_spec: 'chars|count;chars|count;...'");
-        eprintln!("  Example: {} 'abcdefg|2;12345|3;!@#' 1000 5000", args[0]);
-        std::process::exit(1);
-    }
-
-    let (space, formula, groups) = match parse_space(&args[1]) {
-        Ok(result) => result,
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            std::process::exit(1);
+        println!("Spec:");
+        for g in groups {
+            let label = if g.positions == 1 {
+                "character"
+            } else {
+                "characters"
+            };
+            println!("    - {} = {} {} in \"{}\"", g.spec, g.positions, label, g.expanded);
         }
-    };
-
-    if let Some(flag) = &space_flag {
-        let pretty = match flag.split_once('=') {
-            Some((_, "pretty")) => true,
-            Some((_, v)) => {
-                eprintln!("Error: unknown --space value '{}'", v);
-                std::process::exit(1);
-            }
-            None => false,
-        };
-
-        if json_output {
-            println!("{{\"space\":\"{}\"}}", space);
-        } else if pretty {
-            println!("{}", format_with_commas(&space));
-        } else {
-            println!("{}", space);
-        }
-        return;
     }
+}
 
-    let mut tests = Vec::new();
-    for s in &args[2..] {
-        let n = match s.parse::<u128>() {
-            Ok(v) => v,
-            Err(_) => {
-                eprintln!("Error: '{}' is not a valid number", s);
-                std::process::exit(1);
-            }
-        };
+fn cmd_sets(json: bool, groups: &[Group], count: usize) {
+    let count = count.min(10);
+    let examples = generate_example_ids(groups, count);
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&examples).unwrap());
+    } else {
+        println!("Example IDs:");
+        for ex in &examples {
+            println!("  {}", ex);
+        }
+    }
+}
+
+fn cmd_collision(json: bool, space: &Integer, formula: &str, groups: &[Group], values: &[u128]) {
+    let precision = 256;
+
+    for &n in values {
         if n == 0 {
             eprintln!("Error: n must be greater than 0");
             std::process::exit(1);
         }
-        if space <= n {
+        if *space <= n {
             eprintln!(
                 "Error: n={} must be less than space={}",
                 format_with_commas(n),
-                format_with_commas(&space)
+                format_with_commas(space)
             );
             std::process::exit(1);
         }
-        tests.push(n);
     }
 
-    let precision = 256;
-
-    if json_output {
-        let json_groups: Vec<JsonGroup> = groups
-            .iter()
-            .map(|g| JsonGroup {
-                spec: g.spec.clone(),
-                positions: g.positions,
-                chars: g.expanded.clone(),
-            })
-            .collect();
-
-        let results: Vec<JsonRow> = tests
+    if json {
+        let results: Vec<JsonRow> = values
             .iter()
             .map(|&n| {
-                let p = collision_probability(n, &space, precision);
+                let p = collision_probability(n, space, precision);
                 let v = p.to_f64();
-                let space_f = Float::with_val(precision, &space);
-                let remaining = Float::with_val(precision, Integer::from(&space - n));
+                let space_f = Float::with_val(precision, space);
+                let remaining = Float::with_val(precision, Integer::from(space - n));
                 let uc = (remaining.clone() / &space_f * 100u32).to_f64();
                 let rt = (space_f / remaining).to_f64();
 
@@ -297,15 +270,12 @@ fn main() {
             })
             .collect();
 
-        let examples = num_sets.map(|count| generate_example_ids(&groups, count));
-
         let output = JsonOutput {
             space: JsonSpace {
-                formula: formula.clone(),
+                formula: formula.to_string(),
                 size: space.to_string(),
-                groups: json_groups,
+                groups: json_groups(groups),
             },
-            examples,
             results,
         };
 
@@ -316,34 +286,14 @@ fn main() {
     println!(
         "Space: {} = {} possible IDs",
         formula,
-        format_with_commas(&space)
+        format_with_commas(space)
     );
-    println!("Spec:");
-    for g in &groups {
-        let chars_label = if g.positions == 1 {
-            "character"
-        } else {
-            "characters"
-        };
-        println!(
-            "    - {} = {} {} in \"{}\"",
-            g.spec, g.positions, chars_label, g.expanded
-        );
-    }
-
-    if let Some(count) = num_sets {
-        println!();
-        println!("Example IDs:");
-        for ex in generate_example_ids(&groups, count) {
-            println!("  {}", ex);
-        }
-    }
     println!();
 
-    let rows: Vec<Row> = tests
+    let rows: Vec<Row> = values
         .iter()
         .map(|&n| {
-            let p = collision_probability(n, &space, precision);
+            let p = collision_probability(n, space, precision);
             let v = p.to_f64();
 
             let probability = if v >= 1.0 {
@@ -365,8 +315,8 @@ fn main() {
                 }
             };
 
-            let space_f = Float::with_val(precision, &space);
-            let remaining = Float::with_val(precision, Integer::from(&space - n));
+            let space_f = Float::with_val(precision, space);
+            let remaining = Float::with_val(precision, Integer::from(space - n));
             let uc = (remaining.clone() / &space_f * 100u32).to_f64();
             let rt = (space_f / remaining).to_f64();
 
@@ -382,4 +332,24 @@ fn main() {
 
     let table = Table::new(&rows).with(Style::rounded()).to_string();
     println!("{table}");
+}
+
+fn main() {
+    let cli = Cli::parse();
+
+    let (space, formula, groups) = match parse_space(&cli.spec) {
+        Ok(result) => result,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    match &cli.command {
+        Command::Space => cmd_space(cli.json, &space, &formula, &groups),
+        Command::Sets { count } => cmd_sets(cli.json, &groups, *count),
+        Command::Collision { values } => {
+            cmd_collision(cli.json, &space, &formula, &groups, values)
+        }
+    }
 }

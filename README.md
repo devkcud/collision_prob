@@ -15,11 +15,18 @@ cargo build --release
 ## usage
 
 ```
-cargo run --release -- '<space_spec>' <...tests>
+cargo run --release -- '<spec>' <command> [args]
 ```
 
-- `space_spec` defines your id format (see below)
-- `...tests` are the population sizes to test
+### commands
+
+| command              | description                                      |
+| -------------------- | ------------------------------------------------ |
+| `space`              | print the total id space size and spec breakdown |
+| `sets <count>`       | generate up to 10 example ids                    |
+| `collision <n1> ...` | compute collision probabilities for given sizes  |
+
+`--json` is available as a global flag on all commands.
 
 ### space spec format
 
@@ -39,13 +46,13 @@ if your spec requires `|` as a character, you have to add the `<positions>`. exa
 instead of:
 
 ```
-cargo run --release -- '#|' 1
+cargo run --release -- '#|' collision 1
 ```
 
 you run:
 
 ```
-cargo run --release -- '#||1' 1
+cargo run --release -- '#||1' collision 1
 ```
 
 ### output columns
@@ -57,15 +64,30 @@ cargo run --release -- '#||1' 1
 | **Unique on 1st try** | chance a new random one is unique in `n` ids                      |
 | **Avg retries**       | Expected random attempts to generate one more unique id           |
 
-## example
+## examples
 
 ```
-$ cargo run --release -- 'a-zA-Z|4;0-9|4' 1000 10000 100000 1000000
+$ cargo run --release -- 'a-zA-Z|4;0-9|4' space
 
-Space: 52^4 × 10^4 = 73,116,160,000 possible IDs
+Space: 52^4 * 10^4 = 73,116,160,000 possible IDs
 Spec:
     - a-zA-Z|4 = 4 characters in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
     - 0-9|4 = 4 characters in "0123456789"
+```
+
+```
+$ cargo run --release -- 'a-zA-Z|4;0-9|4' sets 3
+
+Example IDs:
+  rKwB4829
+  LpAn0173
+  YdQx8461
+```
+
+```
+$ cargo run --release -- 'a-zA-Z|4;0-9|4' collision 1000 10000 100000 1000000
+
+Space: 52^4 * 10^4 = 73,116,160,000 possible IDs
 
 ╭───────────┬────────────────────┬──────────────┬───────────────────┬─────────────╮
 │ n         │ P(collision)       │ Odds         │ Unique on 1st try │ Avg retries │
@@ -86,5 +108,3 @@ ln(P(no collision)) = ln_gamma(S+1) - ln_gamma(S-n+1) - n * ln(S)
 ```
 
 > this means computing probabilities for n=10,000,000 or n=1,000,000,000 is instant.
-
-space values up to `u128` (340,282,366,920,938,463,463,374,607,431,768,211,455) are supported.
