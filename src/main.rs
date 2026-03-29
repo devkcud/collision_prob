@@ -1,5 +1,6 @@
 use std::env;
 
+use rand::seq::IndexedRandom;
 use rug::{Complete, Float, Integer};
 use serde::Serialize;
 use tabled::{Table, Tabled, settings::Style};
@@ -59,6 +60,8 @@ struct JsonRow {
 #[derive(Serialize)]
 struct JsonOutput {
     pub space: JsonSpace,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub examples: Option<Vec<String>>,
     pub results: Vec<JsonRow>,
 }
 
@@ -80,6 +83,22 @@ fn expand_chars(spec: &str) -> String {
     }
 
     result
+}
+
+fn generate_example_ids(groups: &[Group], count: usize) -> Vec<String> {
+    let mut rng = rand::rng();
+    let charsets: Vec<Vec<char>> = groups.iter().map(|g| g.expanded.chars().collect()).collect();
+    (0..count)
+        .map(|_| {
+            let mut id = String::new();
+            for (g, chars) in groups.iter().zip(&charsets) {
+                for _ in 0..g.positions {
+                    id.push(*chars.choose(&mut rng).unwrap());
+                }
+            }
+            id
+        })
+        .collect()
 }
 
 fn parse_space(spec: &str) -> Result<(Integer, String, Vec<Group>), String> {
@@ -146,11 +165,47 @@ struct Row {
 fn main() {
     let raw_args: Vec<String> = env::args().collect();
     let json_output = raw_args.iter().any(|a| a == "--json");
-    let args: Vec<String> = raw_args.into_iter().filter(|a| a != "--json").collect();
+    let space_flag = raw_args
+        .iter()
+        .find(|a| a == &"--space" || a.starts_with("--space="))
+        .cloned();
+    let sets_flag = raw_args
+        .iter()
+        .find(|a| a.starts_with("--sets="))
+        .cloned();
 
-    if args.len() < 3 {
+    if raw_args.iter().any(|a| a == "--sets") {
+        eprintln!("Error: --sets requires a value, e.g. --sets=5");
+        std::process::exit(1);
+    }
+
+    let num_sets: Option<usize> = sets_flag.map(|f| {
+        let val = f.strip_prefix("--sets=").unwrap();
+        let n = val.parse::<usize>().unwrap_or_else(|_| {
+            eprintln!("Error: invalid --sets value '{}'", val);
+            std::process::exit(1);
+        });
+        if n == 0 {
+            eprintln!("Error: --sets must be at least 1");
+            std::process::exit(1);
+        }
+        n.min(10)
+    });
+
+    let args: Vec<String> = raw_args
+        .into_iter()
+        .filter(|a| {
+            a != "--json"
+                && a != "--space"
+                && !a.starts_with("--space=")
+                && !a.starts_with("--sets=")
+        })
+        .collect();
+
+    let min_args = if space_flag.is_some() { 2 } else { 3 };
+    if args.len() < min_args {
         eprintln!(
-            "Usage: {} [--json] '<space_spec>' <n1> [n2] [n3] ...",
+            "Usage: {} [--json] [--space[=pretty]] [--sets=N] '<space_spec>' [n1] [n2] ...",
             args[0]
         );
         eprintln!("  space_spec: 'chars|count;chars|count;...'");
@@ -165,6 +220,26 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    if let Some(flag) = &space_flag {
+        let pretty = match flag.split_once('=') {
+            Some((_, "pretty")) => true,
+            Some((_, v)) => {
+                eprintln!("Error: unknown --space value '{}'", v);
+                std::process::exit(1);
+            }
+            None => false,
+        };
+
+        if json_output {
+            println!("{{\"space\":\"{}\"}}", space);
+        } else if pretty {
+            println!("{}", format_with_commas(&space));
+        } else {
+            println!("{}", space);
+        }
+        return;
+    }
 
     let mut tests = Vec::new();
     for s in &args[2..] {
@@ -222,12 +297,15 @@ fn main() {
             })
             .collect();
 
+        let examples = num_sets.map(|count| generate_example_ids(&groups, count));
+
         let output = JsonOutput {
             space: JsonSpace {
                 formula: formula.clone(),
                 size: space.to_string(),
                 groups: json_groups,
             },
+            examples,
             results,
         };
 
@@ -251,6 +329,14 @@ fn main() {
             "    - {} = {} {} in \"{}\"",
             g.spec, g.positions, chars_label, g.expanded
         );
+    }
+
+    if let Some(count) = num_sets {
+        println!();
+        println!("Example IDs:");
+        for ex in generate_example_ids(&groups, count) {
+            println!("  {}", ex);
+        }
     }
     println!();
 
